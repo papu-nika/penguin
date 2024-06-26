@@ -8,12 +8,26 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	OK_SYNBOL   = "✅"
+	NG_SYNBOL   = "❌"
+	NONE_SYNBOL = "🔲"
+)
+
+func stringOKNG(isRecieved bool) string {
+	if isRecieved {
+		return OK_SYNBOL
+	}
+	return NG_SYNBOL
+}
+
 func NewTable(hight int) *table.Model {
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithFocused(true),
 		table.WithHeight(hight),
 	)
+
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
@@ -42,17 +56,16 @@ var columns = []table.Column{
 func createRow(p pinger) table.Row {
 	stat := p.pinger.Statistics()
 
-	var latest string
-	if p.latestSuccess < stat.PacketsRecv {
-		latest = "✅"
-	} else {
-		latest = "❌"
-	}
+	latest := stringOKNG(p.latestSuccess < stat.PacketsRecv)
 	p.latestSuccess = stat.PacketsRecv
 
 	var history []string
-	for _, h := range p.history {
-		history = append(history, fmt.Sprintf("%d", h.Seq))
+	for _, h := range p.history.Data {
+		if h.isRecieved {
+			history = append(history, OK_SYNBOL)
+		} else {
+			history = append(history, NONE_SYNBOL)
+		}
 	}
 
 	return table.Row{

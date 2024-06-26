@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/papu-nika/penguin/penguin"
+	penguin "github.com/papu-nika/penguin/action"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +21,8 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "penguin [host1] [host2] ...",
-	Short: "A brief description of your application",
-	Long:  ``,
+	Short: "Ping multiple hosts and display the results in a table",
+	Long:  `Ping multiple hosts and display the results in a table.`,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -45,7 +45,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	// interval
 	rootCmd.Flags().DurationVarP(&interval, "interval", "i", 1*time.Second, "interval between pings")
 }

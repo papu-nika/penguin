@@ -12,27 +12,29 @@ import (
 )
 
 const (
-	RECIEVE       = 0
-	SEND          = 1
-	RECIEVE_ERROR = 2
+	RECEIVE = iota
+	SEND
+	RECEIVE_ERROR
+	STOP
+	RESET
 )
 
-type pingMag struct {
+type pingMsg struct {
 	msgType int
 	pkt     *ping.Packet
 	msg     string
 }
 
 type pinger struct {
-	addr          string
+	// addr          string
 	pinger        *ping.Pinger
 	latestSuccess int
-	history       []ping.Packet
+	history       History
 }
 
 type model struct {
-	pinger []pinger
-	sub    chan pingMag
+	pinger map[string]*pinger
+	sub    chan pingMsg
 	table  *table.Model
 }
 
@@ -43,10 +45,10 @@ var baseStyle = lipgloss.NewStyle().
 func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 	var m model
 
-	sub := make(chan pingMag)
+	sub := make(chan pingMsg)
 	m.sub = sub
 
-	var pingers []pinger
+	var pingers map[string]*pinger = make(map[string]*pinger, len(hosts))
 	for _, host := range hosts {
 		p, err := ping.NewPinger(host)
 		if err != nil {
@@ -54,11 +56,11 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 		}
 		p.Interval = interval
 		p.OnSend = func(p *ping.Packet) {
-			sub <- pingMag{msgType: SEND}
+			sub <- pingMsg{msgType: SEND, pkt: p}
 		}
 		p.OnRecv = func(pkt *ping.Packet) {
-			sub <- pingMag{
-				msgType: RECIEVE,
+			sub <- pingMsg{
+				msgType: RECEIVE,
 				pkt:     pkt,
 				msg: fmt.Sprintf("%d bytes from %s:\ticmp_seq=%d time=%v",
 					pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt,
@@ -69,43 +71,41 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 			if strings.Contains(err.Error(), "read udp") {
 				return
 			}
-			sub <- pingMag{
-				msgType: RECIEVE_ERROR,
-				msg:     fmt.Sprintf("Error: %s", err),
+			sub <- pingMsg{
+				msgType: RECEIVE_ERROR,
+				msg:     errorPacket(err, nil),
 			}
 		}
 		p.OnSendError = func(pkt *ping.Packet, err error) {
-			sub <- pingMag{
-				msgType: RECIEVE_ERROR,
-				msg:     fmt.Sprintf("Error: %s %d %s", err, pkt.Seq, pkt.Addr),
+			sub <- pingMsg{
+				msgType: RECEIVE_ERROR,
+				msg:     errorPacket(err, pkt),
 			}
 		}
-		pingers = append(pingers, pinger{pinger: p, latestSuccess: 0, addr: host})
+
+		pingers[host] = &pinger{
+			pinger:        p,
+			latestSuccess: 0,
+			history:       History{MaxLen: 10},
+		}
 	}
 	m.pinger = pingers
 
 	m.table = NewTable(len(hosts))
+
 	return &m, nil
 }
 
 // A command that waits for the activity on the channel.
-func waitForActivity(sub chan pingMag) tea.Cmd {
+func waitForActivity(sub chan pingMsg) tea.Cmd {
 	return func() tea.Msg {
-		return pingMag(<-sub)
+		return pingMsg(<-sub)
 	}
 }
 
-func (p *pinger) appendHistory(packet *ping.Packet) {
-	p.history = append(p.history, *packet)
-}
-
-func findPinger(pingers []pinger, addr string) *pinger {
-	for i, p := range pingers {
-		if p.addr == addr {
-			return &pingers[i]
-		}
-	}
-	return nil
+func (m model) findPinger(addr string) *pinger {
+	p := m.pinger[addr]
+	return p
 }
 
 func (m model) Init() tea.Cmd {
@@ -124,17 +124,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case pingMag:
+	case pingMsg:
 		switch msg.msgType {
 		case SEND:
+			m.findPinger(msg.pkt.Addr).history.AppendFirst(HistoryData{Seq: msg.pkt.Seq, isRecieved: false})
 			return m, waitForActivity(m.sub) // wait for next event
-		case RECIEVE:
-			findPinger(m.pinger, msg.pkt.Addr).appendHistory(msg.pkt)
+		case RECEIVE:
+			m.findPinger(msg.pkt.Addr).history.Recieved(msg.pkt.Seq)
 			return m, tea.Batch(
 				waitForActivity(m.sub),
 				tea.Println(msg.msg),
 			)
-		case RECIEVE_ERROR:
+		case RECEIVE_ERROR:
 			return m, tea.Batch(
 				waitForActivity(m.sub),
 				tea.Println(msg.msg),
@@ -148,7 +149,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	var rows []table.Row
 	for _, p := range m.pinger {
-		rows = append(rows, createRow(p))
+		rows = append(rows, createRow(*p))
 	}
 	m.table.SetRows(rows)
 	return baseStyle.Render(m.table.View())
@@ -164,4 +165,11 @@ func (m model) Run() error {
 		return err
 	}
 	return nil
+}
+
+func errorPacket(err error, pkt *ping.Packet) string {
+	if pkt == nil {
+		return fmt.Sprintf("Error: %s", err)
+	}
+	return fmt.Sprintf("Error: %s %d %s", err, pkt.Seq, pkt.Addr)
 }
