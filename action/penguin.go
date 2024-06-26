@@ -36,6 +36,7 @@ type model struct {
 	pinger map[string]*pinger
 	sub    chan pingMsg
 	table  *table.Model
+	hosts  []string
 }
 
 var baseStyle = lipgloss.NewStyle().
@@ -90,7 +91,7 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 		}
 	}
 	m.pinger = pingers
-
+	m.hosts = hosts
 	m.table = NewTable(len(hosts))
 
 	return &m, nil
@@ -117,6 +118,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
+			for _, p := range m.pinger {
+				p.pinger.Stop()
+			}
 			return m, tea.Quit
 		default:
 			table, cmd := m.table.Update(msg)
@@ -148,8 +152,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	var rows []table.Row
-	for _, p := range m.pinger {
-		rows = append(rows, createRow(*p))
+	for _, host := range m.hosts {
+		rows = append(rows, createRow(*m.pinger[host]))
 	}
 	m.table.SetRows(rows)
 	return baseStyle.Render(m.table.View())
