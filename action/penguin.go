@@ -178,14 +178,3 @@ func errorPacket(err error, pkt *ping.Packet) string {
 	}
 	return fmt.Sprintf("Error: %s %d %s", err, pkt.Seq, pkt.Addr)
 }
-
-func (p pinger) getLatestSuccess() {
-	if len(p.history.Data) < 1 {
-		return
-	}
-	history := p.history.Data
-	if history[len(history)-1].isRecieved && history[len(history)-2].isRecieved {
-		return
-	}
-	return
-}
