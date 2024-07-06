@@ -14,11 +14,11 @@ const (
 	NONE_SYNBOL = "🔲"
 )
 
-func stringOKNG(isRecieved bool) string {
+func stringOKNONE(isRecieved bool) string {
 	if isRecieved {
 		return OK_SYNBOL
 	}
-	return NG_SYNBOL
+	return NONE_SYNBOL
 }
 
 func NewTable(hight int) *table.Model {
@@ -44,20 +44,17 @@ func NewTable(hight int) *table.Model {
 
 var columns = []table.Column{
 	{Title: "", Width: 2},
-	{Title: "Host", Width: 16},
+	{Title: "Host", Width: 22},
 	{Title: "Packets", Width: 8},
 	{Title: "MinRtt", Width: 12},
 	{Title: "MaxRtt", Width: 12},
 	{Title: "AvgRtt", Width: 12},
 	{Title: "StdDev", Width: 12},
-	{Title: "History", Width: 24},
+	{Title: "History", Width: 42},
 }
 
 func createRow(p pinger) table.Row {
 	stat := p.pinger.Statistics()
-
-	latest := stringOKNG(p.latestSuccess < stat.PacketsRecv)
-	p.latestSuccess = stat.PacketsRecv
 
 	var history []string
 	for _, h := range p.history.Data {
@@ -68,9 +65,18 @@ func createRow(p pinger) table.Row {
 		}
 	}
 
+	latest := stringOKNONE(p.history.IsSuccessIndex(p.history.Len() - 1))
+
+	var host string
+	if stat.Addr == stat.IPAddr.IP.String() {
+		host = stat.Addr
+	} else {
+		host = fmt.Sprintf("%s(%s)", stat.Addr, stat.IPAddr.IP.String())
+	}
+
 	return table.Row{
 		latest,
-		stat.Addr,
+		host,
 		fmt.Sprintf("%d/%d", stat.PacketsRecv, stat.PacketsSent),
 		stat.MinRtt.String(),
 		stat.AvgRtt.String(),

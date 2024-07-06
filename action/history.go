@@ -27,3 +27,19 @@ func (h *History) Recieved(seq int) {
 		}
 	}
 }
+
+func (h *History) IsFull() bool {
+	return len(h.Data) == h.MaxLen
+}
+
+// 指定のインデックスが成功かどうかを返す
+func (h *History) IsSuccessIndex(i int) bool {
+	if i < 0 || i >= len(h.Data) {
+		return false
+	}
+	return h.Data[i].isRecieved
+}
+
+func (h History) Len() int {
+	return len(h.Data)
+}

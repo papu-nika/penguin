@@ -27,16 +27,16 @@ type pingMsg struct {
 
 type pinger struct {
 	// addr          string
-	pinger        *ping.Pinger
-	latestSuccess int
-	history       History
+	pinger  *ping.Pinger
+	history History
 }
 
 type model struct {
 	pinger map[string]*pinger
-	sub    chan pingMsg
-	table  *table.Model
-	hosts  []string
+	// 順序を保持するためのスライス
+	pingerList []*pinger
+	sub        chan pingMsg
+	table      *table.Model
 }
 
 var baseStyle = lipgloss.NewStyle().
@@ -64,12 +64,12 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 				msgType: RECEIVE,
 				pkt:     pkt,
 				msg: fmt.Sprintf("%d bytes from %s:\ticmp_seq=%d time=%v",
-					pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt,
+					pkt.Nbytes, pkt.Addr, pkt.Seq, pkt.Rtt,
 				),
 			}
 		}
 		p.OnRecvError = func(err error) {
-			if strings.Contains(err.Error(), "read udp") {
+			if strings.Contains(err.Error(), "read udp") || strings.Contains(err.Error(), "read ip4") {
 				return
 			}
 			sub <- pingMsg{
@@ -84,14 +84,15 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 			}
 		}
 
-		pingers[host] = &pinger{
-			pinger:        p,
-			latestSuccess: 0,
-			history:       History{MaxLen: 10},
+		SetPrivileged(p)
+		pingers[p.Statistics().IPAddr.IP.String()] = &pinger{
+			pinger:  p,
+			history: History{MaxLen: 20},
 		}
+		m.pingerList = append(m.pingerList, pingers[p.Statistics().IPAddr.IP.String()])
+
 	}
 	m.pinger = pingers
-	m.hosts = hosts
 	m.table = NewTable(len(hosts))
 
 	return &m, nil
@@ -100,7 +101,7 @@ func InitialModel(hosts []string, interval time.Duration) (*model, error) {
 // A command that waits for the activity on the channel.
 func waitForActivity(sub chan pingMsg) tea.Cmd {
 	return func() tea.Msg {
-		return pingMsg(<-sub)
+		return <-sub
 	}
 }
 
@@ -131,7 +132,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pingMsg:
 		switch msg.msgType {
 		case SEND:
-			m.findPinger(msg.pkt.Addr).history.AppendFirst(HistoryData{Seq: msg.pkt.Seq, isRecieved: false})
+			m.findPinger(msg.pkt.IPAddr.String()).history.AppendFirst(HistoryData{Seq: msg.pkt.Seq, isRecieved: false})
 			return m, waitForActivity(m.sub) // wait for next event
 		case RECEIVE:
 			m.findPinger(msg.pkt.Addr).history.Recieved(msg.pkt.Seq)
@@ -152,8 +153,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	var rows []table.Row
-	for _, host := range m.hosts {
-		rows = append(rows, createRow(*m.pinger[host]))
+	for _, pinger := range m.pingerList {
+		rows = append(rows, createRow(*pinger))
 	}
 	m.table.SetRows(rows)
 	return baseStyle.Render(m.table.View())
@@ -165,7 +166,7 @@ func (m model) Run() error {
 	}
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+		fmt.Printf("error: %v", err)
 		return err
 	}
 	return nil
@@ -176,4 +177,15 @@ func errorPacket(err error, pkt *ping.Packet) string {
 		return fmt.Sprintf("Error: %s", err)
 	}
 	return fmt.Sprintf("Error: %s %d %s", err, pkt.Seq, pkt.Addr)
+}
+
+func (p pinger) getLatestSuccess() {
+	if len(p.history.Data) < 1 {
+		return
+	}
+	history := p.history.Data
+	if history[len(history)-1].isRecieved && history[len(history)-2].isRecieved {
+		return
+	}
+	return
 }
